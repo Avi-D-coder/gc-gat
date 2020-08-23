@@ -24,7 +24,7 @@ mod tests {
     #[marker]
     pub trait TyEq<A> {}
 
-    // impl<'a, A, B: CoerceLifetime> TyEq<A> for B where A: Id<T = B::Type<'a>> {}
+    impl<'a, 'b, A, B: CoerceLifetime<'b>> TyEq<A> for B where A: Id<T = B::Type<'a>> {}
     // impl<A> TyEq<A> for A {}
 
     // pub unsafe trait CoerceLifetime<'r> {
@@ -85,7 +85,7 @@ mod tests {
 
         pub fn gc<'r, 'a: 'r, T>(&'a self, t: T) -> Gc<'r, T>
         where
-            // A: TyEq<A::Type<'r>>,
+            T: TyEq<A::Type<'r>>,
         {
             todo!()
         }
@@ -137,7 +137,11 @@ mod tests {
     fn gc_alloc_test() {
         let a: Arena<usize> = Arena::new();
         let one: usize = *a.gc(1);
-        // let one = *a.gc("foo");
+        // let one = *a.gc("foo"); //~ Err
+        // [rustc E0271] [E] type mismatch resolving `<<usize as tests::CoerceLifetime<'_>>::Type<'_> as tests::Id>::T == <&str as tests::CoerceLifetime<'_>>::Type<'_>`
+        //         expected type `<usize as tests::CoerceLifetime<'_>>::Type<'_>`
+        // found associated type `<&str as tests::CoerceLifetime<'_>>::Type<'_>`
+        // required because of the requirements on the impl of `tests::TyEq<<usize as tests::CoerceLifetime<'_>>::Type<'_>>` for `&str`
     }
 
     // let lists: Arena<List<u8>> = Arena::new();
