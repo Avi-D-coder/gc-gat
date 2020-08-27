@@ -20,11 +20,15 @@ mod tests {
     impl<T> Id for T {
         type T = T;
     }
+    pub trait ID<T> {}
+    impl<T> ID<T> for T {}
+    pub trait TypeEq<A> {}
+    impl<A: CoerceLifetime, B: CoerceLifetime> TypeEq<A> for B where for<'a> A::Type<'a>: ID<B::Type<'a>>
+    {}
+    // #[marker]
+    // pub trait TyEq<A> {}
 
-    #[marker]
-    pub trait TyEq<A> {}
-
-    impl<'a, 'b, A, B: CoerceLifetime<'b>> TyEq<A> for B where A: Id<T = B::Type<'a>> {}
+    // impl<'a, 'b, A, B: CoerceLifetime> TyEq<A> for B where A: Id<T = B::Type<'a>> {}
     // impl<A> TyEq<A> for A {}
 
     // pub unsafe trait CoerceLifetime<'r> {
@@ -42,19 +46,21 @@ mod tests {
     //     default type Type<#[may_dangle] 'l: 'r> = T;
     // }
 
-    pub unsafe trait CoerceLifetime<'r> {
-        type Type<'l> where 'r: 'l;
+
+
+    pub unsafe trait CoerceLifetime {
+        type Type<'l>: 'l;
         unsafe fn coerce_lifetime<'o, 'n>(old: &'o Self::Type<'o>) -> &'n Self::Type<'n> {
             mem::transmute(old)
         }
     }
 
-    unsafe impl<'r, T: CoerceLifetime<'r>> CoerceLifetime<'r> for Gc<'r, T> {
-        type Type<'l> where 'r: 'l = Gc<'l, T::Type<'l>>;
+    unsafe impl<'r, T: CoerceLifetime> CoerceLifetime for Gc<'r, T> {
+        type Type<'l> = Gc<'l, T::Type<'l>>;
     }
 
-    unsafe impl<'r, T: 'static> CoerceLifetime<'r> for T {
-        default type Type<'l> where 'r: 'l = T;
+    default unsafe impl<T: 'static> CoerceLifetime for T {
+        type Type<'l> where T: 'static = T;
     }
 
     pub struct Arena<T> {
@@ -76,16 +82,16 @@ mod tests {
         }
     }
 
-    impl<'l, A: CoerceLifetime<'l>> Arena<A> {
+    impl<'l, A: CoerceLifetime> Arena<A> {
         fn new() -> Self {
             Self {
                 vec: UnsafeCell::new(Vec::new()),
             }
         }
 
-        pub fn gc<'r, 'a: 'r, T>(&'a self, t: T) -> Gc<'r, T>
-        where
-            T: TyEq<A::Type<'r>>,
+        pub fn gc<'r, 'a: 'r, T: 'r>(&'a self, t: T) -> Gc<'r, T>
+// where
+            // T: TyEq<A::Type<'r>>,
         {
             todo!()
         }
@@ -97,7 +103,7 @@ mod tests {
     #[test]
     fn use_after_free_test() {
         struct Foo<'r>(Gc<'r, usize>);
-        unsafe impl<'r> CoerceLifetime<'r> for Foo<'r> {
+        unsafe impl<'r> CoerceLifetime for Foo<'r> {
             type Type<'l> = Foo<'l>;
         }
 
@@ -113,30 +119,76 @@ mod tests {
     //     Foo(n)
     // }
 
-    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
-    enum List<'r, T: Copy> {
-        Cons(T, Gc<'r, List<'r, T>>),
-        Empty,
+    // #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+    // enum List<'r, T: Copy> {
+    //     Cons(T, Gc<'r, List<'r, T>>),
+    //     Empty,
+    // }
+
+    // unsafe impl<'r, T: 'r + Copy> CoerceLifetime<'r> for List<'r, T> {
+    //     type Type<'l> where 'r: 'l = List<'l, T>;
+    // }
+
+    // impl<'r, T: Copy> List<'r, T> {
+    //     fn cons(
+    //         head: T,
+    //         tail: Gc<'r, List<'r, T>>,
+    //         arena: &'r Arena<List<T>>,
+    //     ) -> Gc<'r, List<'r, T>> {
+    //         arena.gc(List::Cons(head, tail))
+    //     }
+    // }
+
+    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+    pub struct List<'r, T: Copy>(Option<Gc<'r, Elem<'r, T>>>)
+    where
+        T: 'r;
+
+    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+    pub struct Elem<'r, T: Copy>
+    where
+        T: 'r,
+    {
+        pub next: List<'r, T>,
+        pub value: T,
     }
 
-    unsafe impl<'r, T: 'r + Copy> CoerceLifetime<'r> for List<'r, T> {
-        type Type<'l> where 'r: 'l = List<'l, T>;
-    }
-
-    impl<'r, T: Copy> List<'r, T> {
-        fn cons(
-            head: T,
-            tail: Gc<'r, List<'r, T>>,
-            arena: &'r Arena<List<'static, T>>,
-        ) -> Gc<'r, List<'r, T>> {
-            arena.gc(List::Cons(head, tail))
+    impl<'r, T: Copy> From<Gc<'r, Elem<'r, T>>> for List<'r, T> {
+        fn from(e: Gc<'r, Elem<'r, T>>) -> Self {
+            List(Some(e))
         }
     }
 
+    // impl<'r, T: 'r + Copy> List<'r, T> where Self: 'r {
+    //     /// Prepend `value` to a list.
+    //     /// The arguments are in reverse order.
+    //     pub fn cons<'a: 'r>(self, value: T, arena: &'a Arena<Elem<T>>) -> List<'r, T> {
+    //         List::from(arena.gc(Elem { value, next: self }))
+    //     }
+
+    //     /// Inserts an element at position `index`.
+    //     /// This is equivalent `Vec::insert` not Haskell's `insert :: Ord a => a -> [a] -> [a]`.
+    //     ///
+    //     /// # Panics
+    //     ///
+    //     /// Panics if `index > len`.
+    //     /// This function is recursive and may cause a stack overflow.
+    //     ///
+    //     /// TODO Replace with non recursive variant.
+    //     pub fn insert(self, index: usize, arena: &Arena<Elem<T>>) -> List<'r, T> {
+    //         // self.iter().take(index).fold(List::default(), )
+    //         let Gc(Elem { value, next }, _) = self.0.unwrap();
+    //         List::from(arena.gc(Elem {
+    //             value: value.clone(),
+    //             next: next.insert(index - 1, arena),
+    //         }))
+    //     }
+    // }
+
     #[test]
     fn gc_alloc_test() {
-        let a: Arena<usize> = Arena::new();
-        let one: usize = *a.gc(1);
+        // let a: Arena<usize> = Arena::new();
+        // let one: usize = *a.gc(1);
         // let one = *a.gc("foo"); //~ Err
         // [rustc E0271] [E] type mismatch resolving `<<usize as tests::CoerceLifetime<'_>>::Type<'_> as tests::Id>::T == <&str as tests::CoerceLifetime<'_>>::Type<'_>`
         //         expected type `<usize as tests::CoerceLifetime<'_>>::Type<'_>`
