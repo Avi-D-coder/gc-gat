@@ -3,6 +3,9 @@
 #![feature(specialization)]
 #![feature(marker_trait_attr)]
 #![feature(dropck_eyepatch)]
+#![feature(associated_type_defaults)]
+#![feature(negative_impls)]
+#![feature(optin_builtin_traits)]
 
 fn main() {
     println!("Hello, world!");
@@ -13,18 +16,18 @@ mod tests {
     use std::cell::UnsafeCell;
     use std::{mem, ops::Deref};
 
-    pub trait Id {
-        type T;
-    }
+    // pub trait Id {
+    //     type T;
+    // }
 
-    impl<T> Id for T {
-        type T = T;
-    }
+    // impl<T> Id for T {
+    //     type T = T;
+    // }
     pub trait ID<T> {}
     impl<T> ID<T> for T {}
     pub trait TypeEq<A> {}
-    impl<A: CoerceLifetime, B: CoerceLifetime> TypeEq<A> for B where for<'a> A::Type<'a>: ID<B::Type<'a>>
-    {}
+    // impl<A: CoerceLifetime, B: CoerceLifetime> TypeEq<A> for B where for<'a> A::Type<'a>: ID<B::Type<'a>>
+    // {}
     // #[marker]
     // pub trait TyEq<A> {}
 
@@ -46,79 +49,119 @@ mod tests {
     //     default type Type<#[may_dangle] 'l: 'r> = T;
     // }
 
-
-
-    pub unsafe trait CoerceLifetime {
-        type Type<'l>: 'l;
-        unsafe fn coerce_lifetime<'o, 'n>(old: &'o Self::Type<'o>) -> &'n Self::Type<'n> {
-            mem::transmute(old)
-        }
+    fn foo<T: Life>(t: T::Type<'static>) -> T::Type<'static> {
+        t
     }
 
-    unsafe impl<'r, T: CoerceLifetime> CoerceLifetime for Gc<'r, T> {
+    // #[test]
+    // fn function_name_test() {
+    //     foo::<usize>(1usize);
+    // }
+
+    #[test]
+    fn gc_test() {
+        let a: Arena<usize> = Arena::new();
+        let one: Gc<usize> = a.gc(1usize);
+    }
+
+    pub unsafe trait Life {
+        type Type<'l>: 'l + ID<Self::Type<'l>>;
+        // unsafe fn coerce_lifetime<'o, 'n>(old: &'o Self::Type<'o>) -> &'n Self::Type<'n> {
+        //     todo!()
+        // }
+    }
+
+    unsafe impl<'r, T: Life> Life for Gc<'r, T> {
         type Type<'l> = Gc<'l, T::Type<'l>>;
     }
 
-    default unsafe impl<T: 'static> CoerceLifetime for T {
-        type Type<'l> where T: 'static = T;
+    unsafe impl<T> Life for T {
+        default type Type<'l> = ();
     }
+
+    unsafe impl<T: 'static + NotDerived> Life for T {
+        type Type<'l> = T;
+    }
+
+    pub auto trait NotDerived {}
+    impl<'l, T> !NotDerived for Gc<'l, T> {}
+
+    // unsafe impl<T: 'static + Static<T>> Life for T {
+    //     type Type<'l> = T;
+    // }
+
+    // pub trait Static<T: 'static>: Life<Type = T> {}
+
+    //     pub unsafe trait CoerceLifetime {
+    //         type Type<'l>: 'l;
+    //         unsafe fn coerce_lifetime<'o, 'n>(old: &'o Self::Type<'o>) -> &'n Self::Type<'n> {
+    //             mem::transmute(old)
+    //         }
+    //     }
+
+    //     unsafe impl<'r, T: CoerceLifetime> CoerceLifetime for Gc<'r, T> {
+    //         type Type<'l> = Gc<'l, T::Type<'l>>;
+    //     }
+
+    //     default unsafe impl<T: 'static> CoerceLifetime for T {
+    //         type Type<'l> where T: 'static = T;
+    //     }
 
     pub struct Arena<T> {
         vec: UnsafeCell<Vec<T>>,
     }
 
-    #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+    //     #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
     pub struct Gc<'r, T>(&'r T, ());
-    impl<'r, T> Copy for Gc<'r, T> {}
-    impl<'r, T> Clone for Gc<'r, T> {
-        fn clone(&self) -> Self {
-            *self
-        }
-    }
-    impl<'r, T> Deref for Gc<'r, T> {
-        type Target = T;
-        fn deref(&self) -> &T {
-            self.0
-        }
-    }
+    //     impl<'r, T> Copy for Gc<'r, T> {}
+    //     impl<'r, T> Clone for Gc<'r, T> {
+    //         fn clone(&self) -> Self {
+    //             *self
+    //         }
+    //     }
+    //     impl<'r, T> Deref for Gc<'r, T> {
+    //         type Target = T;
+    //         fn deref(&self) -> &T {
+    //             self.0
+    //         }
+    //     }
 
-    impl<'l, A: CoerceLifetime> Arena<A> {
+    impl<'l, A: Life> Arena<A> {
         fn new() -> Self {
             Self {
                 vec: UnsafeCell::new(Vec::new()),
             }
         }
 
-        pub fn gc<'r, 'a: 'r, T: 'r>(&'a self, t: T) -> Gc<'r, T>
-// where
-            // T: TyEq<A::Type<'r>>,
+        pub fn gc<'r, 'a: 'r, T: Life>(&'a self, t: T) -> Gc<'r, T::Type<'r>>
+        where
+            A::Type<'static>: ID<T::Type<'static>>,
         {
             todo!()
         }
     }
-    impl<T> Drop for Arena<T> {
-        fn drop(&mut self) {}
-    }
+    //     impl<T> Drop for Arena<T> {
+    //         fn drop(&mut self) {}
+    //     }
 
     #[test]
     fn use_after_free_test() {
         struct Foo<'r>(Gc<'r, usize>);
-        unsafe impl<'r> CoerceLifetime for Foo<'r> {
+        unsafe impl<'r> Life for Foo<'r> {
             type Type<'l> = Foo<'l>;
         }
 
-        // let usizes: Arena<usize> = Arena::new();
-        // let foos: Arena<Foo> = Arena::new();
+        let usizes: Arena<usize> = Arena::new();
+        let foos: Arena<Foo> = Arena::new();
 
-        // let n = usizes.gc(1usize);
-        // let foo = foos.gc(Foo(n));
+        let n = usizes.gc(1usize);
+        let foo = foos.gc(Foo(n));
+
+        fn foo<'r>(n: usize, usizes: &'r Arena<usize>) -> Foo<'r> {
+            let n = usizes.gc(n);
+            Foo(n)
+        }
     }
-
-    // fn foo<'r>(n: usize, usizes: &'r Arena<usize>) -> Foo<'r> {
-    //     let n = usizes.gc(n);
-    //     Foo(n)
-    // }
-
     // #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
     // enum List<'r, T: Copy> {
     //     Cons(T, Gc<'r, List<'r, T>>),
@@ -139,25 +182,25 @@ mod tests {
     //     }
     // }
 
-    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
-    pub struct List<'r, T: Copy>(Option<Gc<'r, Elem<'r, T>>>)
-    where
-        T: 'r;
+    // #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+    // pub struct List<'r, T: Copy>(Option<Gc<'r, Elem<'r, T>>>)
+    // where
+    //     T: 'r;
 
-    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
-    pub struct Elem<'r, T: Copy>
-    where
-        T: 'r,
-    {
-        pub next: List<'r, T>,
-        pub value: T,
-    }
+    // #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+    // pub struct Elem<'r, T: Copy>
+    // where
+    //     T: 'r,
+    // {
+    //     pub next: List<'r, T>,
+    //     pub value: T,
+    // }
 
-    impl<'r, T: Copy> From<Gc<'r, Elem<'r, T>>> for List<'r, T> {
-        fn from(e: Gc<'r, Elem<'r, T>>) -> Self {
-            List(Some(e))
-        }
-    }
+    // impl<'r, T: Copy> From<Gc<'r, Elem<'r, T>>> for List<'r, T> {
+    //     fn from(e: Gc<'r, Elem<'r, T>>) -> Self {
+    //         List(Some(e))
+    //     }
+    // }
 
     // impl<'r, T: 'r + Copy> List<'r, T> where Self: 'r {
     //     /// Prepend `value` to a list.
