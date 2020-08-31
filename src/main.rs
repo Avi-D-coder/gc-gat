@@ -23,8 +23,12 @@ mod tests {
     // impl<T> Id for T {
     //     type T = T;
     // }
-    pub trait ID<T> {}
-    impl<T> ID<T> for T {}
+    pub trait ID {
+        type T;
+    }
+    impl<T> ID for T {
+        type T = T;
+    }
     pub trait TypeEq<A> {}
     // impl<A: CoerceLifetime, B: CoerceLifetime> TypeEq<A> for B where for<'a> A::Type<'a>: ID<B::Type<'a>>
     // {}
@@ -49,10 +53,6 @@ mod tests {
     //     default type Type<#[may_dangle] 'l: 'r> = T;
     // }
 
-    fn foo<T: Life>(t: T::Type<'static>) -> T::Type<'static> {
-        t
-    }
-
     // #[test]
     // fn function_name_test() {
     //     foo::<usize>(1usize);
@@ -64,28 +64,36 @@ mod tests {
         let one: Gc<usize> = a.gc(1usize);
     }
 
-    pub unsafe trait Life {
-        type Type<'l>: 'l + ID<Self::Type<'l>>;
-        // unsafe fn coerce_lifetime<'o, 'n>(old: &'o Self::Type<'o>) -> &'n Self::Type<'n> {
-        //     todo!()
-        // }
-    }
-
-    unsafe impl<'r, T: Life> Life for Gc<'r, T> {
-        type Type<'l> = Gc<'l, T::Type<'l>>;
-    }
-
-    unsafe impl<T> Life for T {
-        default type Type<'l> = ();
-    }
-
-    unsafe impl<T: 'static + NotDerived> Life for T {
-        type Type<'l> = T;
-    }
 
     pub auto trait NotDerived {}
     impl<'l, T> !NotDerived for Gc<'l, T> {}
 
+    pub trait GC<'r, T: Life>:  Life
+    {
+    }
+    impl<'r, T:  Life> GC<'r, T> for T {}
+
+    // pub unsafe fn coerce_lifetime<'n, T>(old: T) -> T::L<'n>
+    // where
+    //     T: Life + Sized,
+    //     T::L<'n>: Life + Sized,
+    // {
+    //     mem::transmute(old)
+    // }
+
+
+    pub unsafe trait Life {
+        type L<'l>: 'l + Life + TyEq<Self>;
+    }
+    unsafe impl<'r, T: Life> Life for Gc<'r, T> {
+        type L<'l> = Gc<'l, T::L<'l>>;
+    }
+    unsafe impl<T: 'static + NotDerived> Life for T {
+        type L<'l> = T;
+    }
+
+    pub unsafe trait TyEq<B: Life>: Life where Self::L<'static>: ID<T = B::L<'static>> {}
+    unsafe impl<A: Life, B: Life> TyEq<B> for A where Self::L<'static>: ID<T = B::L<'static>> {}
     // unsafe impl<T: 'static + Static<T>> Life for T {
     //     type Type<'l> = T;
     // }
@@ -133,9 +141,9 @@ mod tests {
             }
         }
 
-        pub fn gc<'r, 'a: 'r, T: Life>(&'a self, t: T) -> Gc<'r, T::Type<'r>>
+        pub fn gc<'r, 'a: 'r, T: Life>(&'a self, t: T) -> Gc<'r, T::L<'r>>
         where
-            A::Type<'static>: ID<T::Type<'static>>,
+            A::L<'static>: ID<T = T::L<'static>>,
         {
             todo!()
         }
@@ -144,24 +152,24 @@ mod tests {
     //         fn drop(&mut self) {}
     //     }
 
-    #[test]
-    fn use_after_free_test() {
-        struct Foo<'r>(Gc<'r, usize>);
-        unsafe impl<'r> Life for Foo<'r> {
-            type Type<'l> = Foo<'l>;
-        }
+    // #[test]
+    // fn use_after_free_test() {
+    //     struct Foo<'r>(Gc<'r, usize>);
+    //     unsafe impl<'r> Life for Foo<'r> {
+    //         type Type<'l> = Foo<'l>;
+    //     }
 
-        let usizes: Arena<usize> = Arena::new();
-        let foos: Arena<Foo> = Arena::new();
+    //     let usizes: Arena<usize> = Arena::new();
+    //     let foos: Arena<Foo> = Arena::new();
 
-        let n = usizes.gc(1usize);
-        let foo = foos.gc(Foo(n));
+    //     let n = usizes.gc(1usize);
+    //     let foo = foos.gc(Foo(n));
 
-        fn foo<'r>(n: usize, usizes: &'r Arena<usize>) -> Foo<'r> {
-            let n = usizes.gc(n);
-            Foo(n)
-        }
-    }
+    //     fn foo<'r>(n: usize, usizes: &'r Arena<usize>) -> Foo<'r> {
+    //         let n = usizes.gc(n);
+    //         Foo(n)
+    //     }
+    // }
     // #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
     // enum List<'r, T: Copy> {
     //     Cons(T, Gc<'r, List<'r, T>>),
