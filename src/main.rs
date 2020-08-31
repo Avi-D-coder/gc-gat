@@ -11,6 +11,46 @@ fn main() {
     println!("Hello, world!");
 }
 
+/// Should be implemented with each `Trace` impl.
+pub auto trait NotDerived {}
+impl<'l, T> !NotDerived for Gc<'l, T> {}
+
+unsafe trait Life {
+    type L<'l>: 'l + Life;
+}
+
+unsafe impl<'r, T: 'static + NotDerived> Life for T {
+    type L<'l> = T;
+}
+
+struct Gc<'r, T>(&'r T);
+unsafe impl<'r, T: Life> Life for Gc<'r, T> {
+    type L<'l> = Gc<'l, T::L<'l>>;
+}
+
+unsafe impl<'r, T: Life> Life for Option<T> {
+    type L<'l> = Option<T::L<'l>>;
+}
+
+impl<T> !NotDerived for Option<T> {}
+
+unsafe impl<'r, T: Life> Life for List<'r, T> {
+    type L<'l> = List<'l, T::L<'l>>;
+}
+
+unsafe impl<'r, T: Life> Life for Elem<'r, T> {
+    type L<'l> = Elem<'l, T::L<'l>>;
+}
+
+impl<'r, T> !NotDerived for Elem<'r, T> {}
+impl<'r, T> !NotDerived for List<'r, T> {}
+
+struct List<'r, T: Life>(<Option<Elem<'r, T::L<'r>>> as Life>::L<'r>);
+struct Elem<'r, T: Life> {
+    next: List<'r, T::L<'r>>,
+    value: T,
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::UnsafeCell;
@@ -54,9 +94,9 @@ mod tests {
     //     }
     // }
 
-    unsafe impl<'r, K: Life +  GC<T = K>, V:  Life + GC<T = V>> Life for Node<'r, K, V> {
-        type L<'l> = Node<'l, K::L<'l>, V::L<'l>>;
-    }
+    // unsafe impl<'r, K: Life +  GC<T = K>, V:  Life + GC<T = V>> Life for Node<'r, K, V> {
+    //     type L<'l> = Node<'l, K::L<'l>, V::L<'l>>;
+    // }
 
     pub trait ID {
         type T;
@@ -102,19 +142,8 @@ mod tests {
     pub auto trait NotDerived {}
     impl<'l, T> !NotDerived for Gc<'l, T> {}
 
-    pub trait GC: Life {
-        type T: TyEq<B = Self::L<'static>>;
-    }
-    impl<'r, T: Life> GC for T {
-        type T = T;
-    }
-
-    pub unsafe fn coerce_lifetime<'n, T: Sized + Life>(old: T) -> T::L<'n> {
-        mem::transmute(old)
-    }
-
     pub unsafe trait Life {
-        type L<'l>: 'l + Life + GC<T = Self>;
+        type L<'l>: 'l + TyEq<Self>;
     }
 
     // pub unsafe fn coerce_lifetime<'n, T>(old: T) -> T::L<'n> where T:Life + Sized, T::L<'n>: Life + Sized {
@@ -129,12 +158,11 @@ mod tests {
         type L<'l> = T;
     }
 
-    pub unsafe trait TyEq: Life {
-        type B: Life where Self::B: ID<T = Self::L<'static>>;
-    }
-    unsafe impl<A: Life, B: Life> TyEq for A {
-        type B = B;
-    }
+    #[marker]
+    pub unsafe trait TyEq<B> {}
+    unsafe impl<T> TyEq<T> for T {}
+    unsafe impl<'l, T: Life> TyEq<T> for T::L<'l> {}
+    unsafe impl<'l, T: Life> TyEq<T::L<'l>> for T {}
 
     // unsafe impl<T: 'static + Static<T>> Life for T {
     //     type Type<'l> = T;
@@ -183,8 +211,7 @@ mod tests {
             }
         }
 
-        pub fn gc<'r, 'a: 'r, T: Life>(&'a self, t: T) -> Gc<'r, T::L<'r>>
-        {
+        pub fn gc<'r, 'a: 'r, T: Life>(&'a self, t: T) -> Gc<'r, T::L<'r>> {
             todo!()
         }
     }
