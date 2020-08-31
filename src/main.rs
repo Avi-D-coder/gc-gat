@@ -16,13 +16,48 @@ mod tests {
     use std::cell::UnsafeCell;
     use std::{mem, ops::Deref};
 
-    // pub trait Id {
-    //     type T;
+    pub struct Map<'r, K, V>(Option<Gc<'r, Node<'r, K, V>>>)
+    where
+        K: 'r,
+        V: 'r;
+
+    pub struct Node<'r, K, V>
+    where
+        K: 'r,
+        V: 'r,
+    {
+        key: K,
+        size: usize,
+        left: Map<'r, K, V>,
+        right: Map<'r, K, V>,
+        value: V,
+    }
+
+    // impl<'r, K: GC<T = K>, V: GC<T = V>> Node<'r, K, V> {
+    //     pub fn gc<'new_root, 'arena: 'new_root, 'left, 'right>(
+    //         key: K,
+    //         size: usize,
+    //         left: impl GC<T = Self>,
+    //         right: impl GC<T = Self>,
+    //         value: V,
+    //         arena: &'arena Arena<Self>,
+    //     ) -> Gc<'new_root, <Self as Life>::L<'new_root>> {
+    //         unsafe {
+    //             arena.gc(Node {
+    //                 key: todo!(),
+    //                 size,
+    //                 left: todo!(),
+    //                 right: todo!(),
+    //                 value: todo!(),
+    //             });
+    //         }
+    //     }
     // }
 
-    // impl<T> Id for T {
-    //     type T = T;
-    // }
+    unsafe impl<'r, K: Life +  GC<T = K>, V:  Life + GC<T = V>> Life for Node<'r, K, V> {
+        type L<'l> = Node<'l, K::L<'l>, V::L<'l>>;
+    }
+
     pub trait ID {
         type T;
     }
@@ -64,36 +99,43 @@ mod tests {
         let one: Gc<usize> = a.gc(1usize);
     }
 
-
     pub auto trait NotDerived {}
     impl<'l, T> !NotDerived for Gc<'l, T> {}
 
-    pub trait GC<'r, T: Life>:  Life
-    {
+    pub trait GC: Life {
+        type T: TyEq<B = Self::L<'static>>;
     }
-    impl<'r, T:  Life> GC<'r, T> for T {}
+    impl<'r, T: Life> GC for T {
+        type T = T;
+    }
 
-    // pub unsafe fn coerce_lifetime<'n, T>(old: T) -> T::L<'n>
-    // where
-    //     T: Life + Sized,
-    //     T::L<'n>: Life + Sized,
-    // {
+    pub unsafe fn coerce_lifetime<'n, T: Sized + Life>(old: T) -> T::L<'n> {
+        mem::transmute(old)
+    }
+
+    pub unsafe trait Life {
+        type L<'l>: 'l + Life + GC<T = Self>;
+    }
+
+    // pub unsafe fn coerce_lifetime<'n, T>(old: T) -> T::L<'n> where T:Life + Sized, T::L<'n>: Life + Sized {
     //     mem::transmute(old)
     // }
 
-
-    pub unsafe trait Life {
-        type L<'l>: 'l + Life + TyEq<Self>;
-    }
     unsafe impl<'r, T: Life> Life for Gc<'r, T> {
         type L<'l> = Gc<'l, T::L<'l>>;
     }
+
     unsafe impl<T: 'static + NotDerived> Life for T {
         type L<'l> = T;
     }
 
-    pub unsafe trait TyEq<B: Life>: Life where Self::L<'static>: ID<T = B::L<'static>> {}
-    unsafe impl<A: Life, B: Life> TyEq<B> for A where Self::L<'static>: ID<T = B::L<'static>> {}
+    pub unsafe trait TyEq: Life {
+        type B: Life where Self::B: ID<T = Self::L<'static>>;
+    }
+    unsafe impl<A: Life, B: Life> TyEq for A {
+        type B = B;
+    }
+
     // unsafe impl<T: 'static + Static<T>> Life for T {
     //     type Type<'l> = T;
     // }
@@ -142,8 +184,6 @@ mod tests {
         }
 
         pub fn gc<'r, 'a: 'r, T: Life>(&'a self, t: T) -> Gc<'r, T::L<'r>>
-        where
-            A::L<'static>: ID<T = T::L<'static>>,
         {
             todo!()
         }
