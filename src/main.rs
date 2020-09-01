@@ -11,9 +11,26 @@ fn main() {
     println!("Hello, world!");
 }
 
+pub unsafe trait Live<'r, T> {
+    type Base: 'r;
+}
+
+unsafe impl<'r, T: Life> Live<'r, T> for T {
+    default type Base = T::L<'r>;
+}
+
+
+unsafe impl<'r, T: Life + TyEq<T::Base>> Live<'r, T> for T::L<'r> {
+    type Base = T::L<'r>;
+}
+
 pub unsafe trait Life: Immutable {
     type L<'l>: 'l + Life + Immutable;
 }
+
+// unsafe impl<'r, T: Li> Li for Gc<'r, T> {
+//     type L<'l> = Gc<'l, T::L<'l>>;
+// }
 
 pub struct IncorrectImpls;
 
@@ -25,8 +42,8 @@ unsafe impl<T: 'static + Immutable + NotDerived> Life for T {
     type L<'l> = T;
 }
 
-pub trait GC<T>: Life {}
-impl<'r, T: Life, S: Life + TyEq<T>> GC<T> for S {}
+// pub trait GC: Life where for<'r> Self::L<'r>: Live<'r, R = Self::L<'r>> {}
+// impl<T: Life> GC for T where for<'r> Self::L<'r>: Live<'r, R = Self::L<'r>> {}
 
 #[marker]
 pub unsafe trait TyEq<B> {}
@@ -92,6 +109,7 @@ mod auto_traits {
     impl<'l, T> !NotDerived for Gc<'l, T> {}
 }
 
+#[cfg(off)]
 mod list {
     use super::*;
     #[derive(Copy, Clone)]
@@ -103,7 +121,7 @@ mod list {
         value: T::L<'r>,
     }
 
-    impl<'r, T: 'r + Life> Elem<'r, T> {
+    impl<'r, T: GC> Elem<'r, T> {
         pub fn gc<'a: 'r>(
             arena: &'a Arena<Elem<T>>,
             next: List<T>,
@@ -127,10 +145,10 @@ mod list {
         }
     }
 
-    impl<'r, T: 'r + Life + Clone> List<'r, T> {
+    impl<'r, T: Life + Live<'r> + Clone> List<'r, T> {
         /// Prepend `value` to a list.
         /// The arguments are in reverse order.
-        pub fn cons<'a: 'r>(self, value: T, arena: &'a Arena<Elem<T>>) -> List<'r, T> {
+        pub fn cons<'a: 'r>(self, value: T, arena: &'a Arena<Elem<T>>) -> List<'r, T::R> {
             List::from(Elem::gc(arena, self, value))
         }
     }
@@ -155,16 +173,12 @@ mod list {
             .0
             .value;
 
-        fn foo<T: Life>(arena: &Arena<Elem<T>>, value: T) {
-            let _: T = Elem::<List<T>> {
-                next: List(None),
-                value: List::from(Elem::gc(arena, List(None), value)),
-            }
-            .value
-            .0
-            .unwrap()
-            .0
-            .value;
+        fn foo<'r, T: Live<'r>>(ll: &Arena<Elem<List<T>>>, lt: &Arena<Elem<T>>, value: T) {
+            let val: List<T::R> = List::from(Elem::gc(lt, List(None), value));
+            let _: Gc<Elem<List<T::R>>> = Elem::gc(ll,
+                List(None),
+                val
+                );
         }
         // let _: List<List<Gc<&usize>>> = todo!(); //~ Err the trait bound `&usize: auto_traits::Immutable` is not satisfied
     }
