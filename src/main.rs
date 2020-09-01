@@ -92,72 +92,80 @@ mod auto_traits {
     impl<'l, T> !NotDerived for Gc<'l, T> {}
 }
 
-#[derive(Copy, Clone)]
-pub struct List<'r, T: 'r + Life>(Option<Gc<'r, Elem<'r, T>>>);
+mod list {
+    use super::*;
+    #[derive(Copy, Clone)]
+    pub struct List<'r, T: 'r + Life>(Option<Gc<'r, Elem<'r, T>>>);
 
-#[derive(Clone)]
-pub struct Elem<'r, T: 'r + Life> {
-    next: List<'r, T>,
-    value: T::L<'r>,
-}
-
-impl<'r, T: 'r + Life> Elem<'r, T> {
-    pub fn gc<'a: 'r>(arena: &'a Arena<Elem<T>>, next: List<T>, value: T) -> Gc<'r, Elem<'r, T::L<'r>>> {
-        todo!()
+    #[derive(Clone)]
+    pub struct Elem<'r, T: 'r + Life> {
+        next: List<'r, T>,
+        value: T::L<'r>,
     }
-}
 
-impl<'r, T: 'r + Life + Copy> Copy for Elem<'r, T> where T::L<'r>: Copy {}
-unsafe impl<'r, T: 'r + Life> Life for List<'r, T> {
-    type L<'l> = List<'l, T::L<'l>>;
-}
-unsafe impl<'r, T: 'r + Life> Life for Elem<'r, T> {
-    type L<'l> = Elem<'l, T::L<'l>>;
-}
-
-impl<'r, T: Life> From<Gc<'r, Elem<'r, T>>> for List<'r, T> {
-    fn from(e: Gc<'r, Elem<'r, T>>) -> Self {
-        List(Some(e))
-    }
-}
-
-impl<'r, T: 'r + Life + Clone> List<'r, T> {
-    /// Prepend `value` to a list.
-    /// The arguments are in reverse order.
-    pub fn cons<'a: 'r>(self, value: T, arena: &'a Arena<Elem<T>>) -> List<'r, T> {
-        List::from(Elem::gc(arena, self, value))
-    }
-}
-
-#[test]
-fn test() {
-    #![allow(unreachable_code)]
-    let _: List<List<usize>> = todo!();
-    let _: List<List<Gc<String>>> = todo!();
-    let _: List<Gc<String>> = todo!();
-    let _: List<Gc<String>> = todo!();
-
-    let _: usize = Elem::<usize> {
-        next: List(None),
-        value: 1,
-    }
-    .value;
-
-    let _: usize = List::from(Elem::gc(todo!(), List(None), 1))
-        .0
-        .unwrap()
-        .0
-        .value;
-
-    fn foo<T: Life>(arena: &Arena<Elem<T>>, value: T) {
-        let _: T = Elem::<List<T>> {
-            next: List(None),
-            value: List::from(Elem::gc(arena, List(None), value)),
+    impl<'r, T: 'r + Life> Elem<'r, T> {
+        pub fn gc<'a: 'r>(
+            arena: &'a Arena<Elem<T>>,
+            next: List<T>,
+            value: T,
+        ) -> Gc<'r, Elem<'r, T::L<'r>>> {
+            todo!()
         }
-        .value
-        .0
-        .unwrap().0
-        .value;
     }
-    // let _: List<List<Gc<&usize>>> = todo!(); //~ Err the trait bound `&usize: auto_traits::Immutable` is not satisfied
+
+    impl<'r, T: 'r + Life + Copy> Copy for Elem<'r, T> where T::L<'r>: Copy {}
+    unsafe impl<'r, T: 'r + Life> Life for List<'r, T> {
+        type L<'l> = List<'l, T::L<'l>>;
+    }
+    unsafe impl<'r, T: 'r + Life> Life for Elem<'r, T> {
+        type L<'l> = Elem<'l, T::L<'l>>;
+    }
+
+    impl<'r, T: Life> From<Gc<'r, Elem<'r, T>>> for List<'r, T> {
+        fn from(e: Gc<'r, Elem<'r, T>>) -> Self {
+            List(Some(e))
+        }
+    }
+
+    impl<'r, T: 'r + Life + Clone> List<'r, T> {
+        /// Prepend `value` to a list.
+        /// The arguments are in reverse order.
+        pub fn cons<'a: 'r>(self, value: T, arena: &'a Arena<Elem<T>>) -> List<'r, T> {
+            List::from(Elem::gc(arena, self, value))
+        }
+    }
+
+    #[test]
+    fn test() {
+        #![allow(unreachable_code)]
+        let _: List<List<usize>> = todo!();
+        let _: List<List<Gc<String>>> = todo!();
+        let _: List<Gc<String>> = todo!();
+        let _: List<Gc<String>> = todo!();
+
+        let _: usize = Elem::<usize> {
+            next: List(None),
+            value: 1,
+        }
+        .value;
+
+        let _: usize = List::from(Elem::gc(todo!(), List(None), 1))
+            .0
+            .unwrap()
+            .0
+            .value;
+
+        fn foo<T: Life>(arena: &Arena<Elem<T>>, value: T) {
+            let _: T = Elem::<List<T>> {
+                next: List(None),
+                value: List::from(Elem::gc(arena, List(None), value)),
+            }
+            .value
+            .0
+            .unwrap()
+            .0
+            .value;
+        }
+        // let _: List<List<Gc<&usize>>> = todo!(); //~ Err the trait bound `&usize: auto_traits::Immutable` is not satisfied
+    }
 }
