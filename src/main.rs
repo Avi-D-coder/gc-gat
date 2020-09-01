@@ -4,6 +4,7 @@
 #![feature(negative_impls)]
 #![feature(optin_builtin_traits)]
 #![feature(marker_trait_attr)]
+#![allow(unreachable_code)]
 
 use auto_traits::{Immutable, NotDerived};
 
@@ -11,39 +12,45 @@ fn main() {
     println!("Hello, world!");
 }
 
-pub unsafe trait Live<'r, T> {
-    type Base: 'r;
+pub unsafe trait Live<'r> {
+    type R: 'r;
 }
 
-unsafe impl<'r, T: Life> Live<'r, T> for T {
-    default type Base = T::L<'r>;
+unsafe impl<'r, T: Life> Live<'r> for T {
+    type R = T::L<'r>;
 }
 
-
-unsafe impl<'r, T: Life + TyEq<T::Base>> Live<'r, T> for T::L<'r> {
-    type Base = T::L<'r>;
+unsafe impl<'r, T: 'r> Live<'r> for T {
+    default type R = T;
 }
 
 pub unsafe trait Life: Immutable {
     type L<'l>: 'l + Life + Immutable;
 }
 
-// unsafe impl<'r, T: Li> Li for Gc<'r, T> {
-//     type L<'l> = Gc<'l, T::L<'l>>;
-// }
-
-pub struct IncorrectImpls;
-
-unsafe impl<T: Immutable> Life for T {
-    default type L<'l> = IncorrectImpls;
-}
-
 unsafe impl<T: 'static + Immutable + NotDerived> Life for T {
     type L<'l> = T;
 }
 
-// pub trait GC: Life where for<'r> Self::L<'r>: Live<'r, R = Self::L<'r>> {}
-// impl<T: Life> GC for T where for<'r> Self::L<'r>: Live<'r, R = Self::L<'r>> {}
+// #[test]
+// fn usize_impl_gc() {
+//     fn f<'r, T: Life>() {
+//         let a: T::L<'r> = todo!();
+//         let b: <T::L<'r> as Life>::L<'r> = todo!();
+//         if true {
+//             a
+//         } else {
+//             b
+//         };
+//     }
+// }
+
+pub trait GC: Life
+where
+    for<'r> Self::L<'r>: Live<'r, R = Self::L<'r>>,
+{
+}
+impl<T: Life> GC for T where for<'r> Self::L<'r>: Live<'r, R = Self::L<'r>> {}
 
 #[marker]
 pub unsafe trait TyEq<B> {}
@@ -109,7 +116,19 @@ mod auto_traits {
     impl<'l, T> !NotDerived for Gc<'l, T> {}
 }
 
-#[cfg(off)]
+pub trait If<A> {
+    type Then;
+}
+
+impl<A> If<A> for A {
+    type Then = A;
+}
+
+impl<A, B> If<B> for A {
+    default type Then = B;
+}
+
+// #[cfg(off)]
 mod list {
     use super::*;
     #[derive(Copy, Clone)]
@@ -121,12 +140,16 @@ mod list {
         value: T::L<'r>,
     }
 
-    impl<'r, T: GC> Elem<'r, T> {
-        pub fn gc<'a: 'r>(
-            arena: &'a Arena<Elem<T>>,
-            next: List<T>,
-            value: T,
-        ) -> Gc<'r, Elem<'r, T::L<'r>>> {
+    impl<'r, A: Life> Elem<'r, A> {
+        pub fn gc<'a: 'r, T: Life>(
+            arena: &'a Arena<Elem<A>>,
+            next: List<A>,
+            value: A,
+        ) -> Gc<'r, Elem<'r, A::Then>>
+        where
+            A: If<T::L<'r>>,
+            A::Then: Immutable + Life,
+        {
             todo!()
         }
     }
@@ -148,7 +171,7 @@ mod list {
     impl<'r, T: Life + Live<'r> + Clone> List<'r, T> {
         /// Prepend `value` to a list.
         /// The arguments are in reverse order.
-        pub fn cons<'a: 'r>(self, value: T, arena: &'a Arena<Elem<T>>) -> List<'r, T::R> {
+        pub fn cons<'a: 'r>(self, value: T, arena: &'a Arena<Elem<T>>) -> List<'r, T> {
             List::from(Elem::gc(arena, self, value))
         }
     }
@@ -175,10 +198,7 @@ mod list {
 
         fn foo<'r, T: Live<'r>>(ll: &Arena<Elem<List<T>>>, lt: &Arena<Elem<T>>, value: T) {
             let val: List<T::R> = List::from(Elem::gc(lt, List(None), value));
-            let _: Gc<Elem<List<T::R>>> = Elem::gc(ll,
-                List(None),
-                val
-                );
+            let _: Gc<Elem<List<T::R>>> = Elem::gc(ll, List(None), val);
         }
         // let _: List<List<Gc<&usize>>> = todo!(); //~ Err the trait bound `&usize: auto_traits::Immutable` is not satisfied
     }
