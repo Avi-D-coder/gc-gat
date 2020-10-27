@@ -9,13 +9,14 @@
 #![allow(unreachable_code)]
 
 use auto_traits::{HasGc, NoGc, NotDerived};
+use std::ops::Deref;
 
 fn main() {
     println!("Hello, world!");
 }
 
 pub unsafe trait Life {
-    type L<'l>: 'l + Life;
+    type L<'l>: 'l + Life<L<'r> = Self::L<'r>>;
 }
 
 #[test]
@@ -27,7 +28,16 @@ unsafe impl<T: 'static + NoGc> Life for T {
     type L<'l> = T;
 }
 
+#[derive(Eq, PartialEq, Ord, PartialOrd)]
 pub struct Gc<'r, T>(&'r T);
+
+impl<'r, T> Deref for Gc<'r, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
 unsafe impl<'r, T: Life> Life for Gc<'r, T> {
     type L<'l> = Gc<'l, T::L<'l>>;
 }
@@ -37,6 +47,8 @@ impl<'r, T: Life> Clone for Gc<'r, T> {
         *self
     }
 }
+
+type Of<'a, #[may_dangle] T> = <T as Life>::L<'a>;
 
 #[test]
 fn eq_test() {
@@ -48,12 +60,63 @@ fn eq_test() {
         a == b;
     }
 
-    fn eq_t<'a, 'b, T: Life + Eq>(a: T::L<'a>, b: T::L<'b>)
+    fn eq_t<'a, 'b, T: Life>(a: T::L<'a>, b: T::L<'b>) -> bool
     where
-        for<'l> T::L<'l>: Eq,
+        T::L<'a>: Eq,
+        'a: 'b,
+        'b: 'a,
     {
-        // a == b; //~ [rustc E0623] [E] lifetime mismatch ...but data from `a` flows into `b` here
+        a == b //~ [rustc E0623] [E] lifetime mismatch ...but data from `a` flows into `b` here
     }
+
+    fn use_eq_t_usize() {
+        let arena: Arena<usize> = Arena::new();
+
+        let a: Gc<usize> = arena.gc(usize::default());
+        let b: Gc<usize> = arena.gc(usize::default());
+
+        eq_t::<Gc<usize>>(a, b);
+
+        let arena_: Arena<usize> = Arena::new();
+
+        let a_ = arena_.mark(a);
+        let b_ = arena_.mark(b);
+
+        drop(arena);
+
+        eq_t::<Gc<usize>>(a_, b_);
+    }
+
+    fn use_eq_t_t<T: Life>()
+    where
+        for<'a> Of<'a, T>: Default + Eq,
+    {
+        let arena: Arena<T> = Arena::new();
+
+        let a: Gc<Of<T>> = arena.gc(Of::<T>::default());
+        let b: Gc<Of<T>> = arena.gc(Of::<T>::default());
+
+        eq_t::<Gc<T>>(a, b);
+
+        let arena_: Arena<T> = Arena::new();
+
+        let a_: Gc<Of<T>> = arena_.mark(a);
+        // let b_: Gc<T> = arena_.mark(b); //~ [rustc E0308] [E] mismatched types expected struct `Gc<'_, T>` found struct `Gc<'_, <T as Life>::L<'_>>`
+
+        drop(arena);
+
+        // eq_t(a_, b_);
+    }
+
+    // fn eq_alloc<'a, 'b, T: Life + Eq>(arena: &'a Arena<T>, a: T, b: &T::L<'b>) -> bool
+    // where
+    //     T::L<'a>: Eq,
+    //     'a: 'b,
+    //     'b: 'a
+    // {
+    //     let a = arena.gc(a);
+    //     *a == b //~ [rustc E0623] [E] lifetime mismatch ...but data from `a` flows into `b` here
+    // }
 }
 
 pub unsafe trait ID<T> {}
@@ -62,8 +125,16 @@ unsafe impl<T> ID<T> for T {}
 pub struct Arena<#[may_dangle] A>(Vec<A>);
 
 impl<#[may_dangle] T: Life> Arena<T> {
-    pub fn gc<'r>(&'r self, t: T) -> Gc<'r, T::L<'r>> {
+    pub fn gc<'r>(&'r self, t: T::L<'_>) -> Gc<'r, T::L<'r>> {
         todo!()
+    }
+
+    pub fn new() -> Arena<T> {
+        todo!()
+    }
+
+    pub fn mark<'n>(&'n self, o: Gc<'_, T::L<'_>>) -> Gc<'n, T::L<'n>> {
+        unsafe { std::mem::transmute(o) }
     }
 }
 
@@ -149,7 +220,7 @@ mod list {
         // }
         // .value;
 
-        let arena: Arena<_> = todo!();
+        let arena: Arena<Elem<usize>> = todo!();
 
         let _: usize = List::<usize>::from(arena.gc(Elem {
             next: List(None),
