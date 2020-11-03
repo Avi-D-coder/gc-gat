@@ -7,8 +7,9 @@
 #![feature(dropck_eyepatch)]
 #![feature(const_generics)]
 #![allow(unreachable_code)]
+#![allow(unused)]
 
-use auto_traits::{HasGc, NoGc, NotDerived};
+use auto_traits::NoGc;
 use std::ops::Deref;
 
 fn main() {
