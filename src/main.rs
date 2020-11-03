@@ -16,7 +16,7 @@ fn main() {
 }
 
 pub unsafe trait Life {
-    type L<'l>: 'l + Life<L<'r> = Self::L<'r>>;
+    type L<'l>: 'l + Life;
 }
 
 #[test]
