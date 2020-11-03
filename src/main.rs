@@ -9,7 +9,7 @@
 #![allow(unreachable_code)]
 #![allow(unused)]
 
-use auto_traits::NoGc;
+use auto_traits::{Immutable, NoGc};
 use std::ops::Deref;
 
 fn main() {
@@ -42,8 +42,8 @@ impl<'r, T> Deref for Gc<'r, T> {
 unsafe impl<'r, T: Life> Life for Gc<'r, T> {
     type L<'l> = Gc<'l, T::L<'l>>;
 }
-impl<'r, T: Life> Copy for Gc<'r, T> {}
-impl<'r, T: Life> Clone for Gc<'r, T> {
+impl<'r, T> Copy for Gc<'r, T> {}
+impl<'r, T> Clone for Gc<'r, T> {
     fn clone(&self) -> Self {
         *self
     }
@@ -61,9 +61,11 @@ fn eq_test() {
         a == b;
     }
 
-    fn eq_t<'a, 'b, T: Life>(a: T::L<'a>, b: T::L<'b>) -> bool
+    fn eq_t<'a, 'b, T: Life>(a: Of<'a, T>, b: Of<'b, T>) -> bool
     where
-        T::L<'a>: Eq,
+        Of<'a, T>: Eq,
+
+        // Prevents error here, but causes problem 3.
         'a: 'b,
         'b: 'a,
     {
@@ -77,6 +79,8 @@ fn eq_test() {
         let b: Gc<usize> = arena.gc(usize::default());
 
         eq_t::<Gc<usize>>(a, b);
+        eq_t::<usize>(*a, *b);
+        // eq_t::<&usize>(&a, &b); //~ requires `a` and `b` to be `'static`
 
         let arena_: Arena<usize> = Arena::new();
 
@@ -90,23 +94,31 @@ fn eq_test() {
 
     fn use_eq_t_t<T: Life>()
     where
+        // 1. Unintuitive constraints.
         for<'a> Of<'a, T>: Default + Eq,
     {
         let arena: Arena<T> = Arena::new();
 
-        let a: Gc<Of<T>> = arena.gc(Of::<T>::default());
+        let a = arena.gc(Of::<T>::default());
         let b: Gc<Of<T>> = arena.gc(Of::<T>::default());
 
+        // 2. Inference rapidly breaks,
         eq_t::<Gc<T>>(a, b);
 
         let arena_: Arena<T> = Arena::new();
 
+        // Root objects in new arena.
         let a_: Gc<Of<T>> = arena_.mark(a);
-        // let b_: Gc<T> = arena_.mark(b); //~ [rustc E0308] [E] mismatched types expected struct `Gc<'_, T>` found struct `Gc<'_, <T as Life>::L<'_>>`
+        let b_: Gc<Of<T>> = arena_.mark(b);
 
-        drop(arena);
+        // 3. Calling `eq_t` requires the arenas to outlive each other.
+        // This produces E0505 below
+        // eq_t::<Gc<T>>(a_, b);
 
-        // eq_t(a_, b_);
+        // Tell the GC objects rooted in old the old `arena` may be freed.
+        drop(arena); //~ [rustc E0505] [E] cannot move out of `arena` because it is borrowed move out of `arena` occurs here
+
+        eq_t::<Gc<T>>(a_, b_);
     }
 
     // fn eq_alloc<'a, 'b, T: Life + Eq>(arena: &'a Arena<T>, a: T, b: &T::L<'b>) -> bool
@@ -171,6 +183,24 @@ mod auto_traits {
     /// Should be implemented with each `Trace` impl.
     pub auto trait NotDerived {}
     impl<'l, T> !NotDerived for Gc<'l, T> {}
+}
+
+// #[derive(Life)]
+enum List<'r, T> {
+    Cons { next: Gc<'r, List<'r, T>>, item: T },
+    Nil,
+}
+
+unsafe impl<'r, T: Life> Life for List<'r, T> {
+    type L<'l> = List<'l, T::L<'l>>;
+}
+
+use std::collections::BTreeSet;
+use std::marker::PhantomData;
+
+impl<T> !NoGc for BTreeSet<T> {}
+unsafe impl<'r, T: Life> Life for BTreeSet<T> {
+    type L<'l> = BTreeSet<T::L<'l>>;
 }
 
 // #[cfg(off)]
