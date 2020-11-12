@@ -53,6 +53,24 @@ type Of<'a, #[may_dangle] T> = <T as Life>::L<'a>;
 
 #[test]
 fn eq_test() {
+    /// This compiles!
+    fn foo_str<'a, 'b>(a: Of<'a, &'static str>, b: Of<'b, &'static str>) {
+        let mut v = a;
+        v = b;
+
+        a == b;
+    }
+
+    /// But this errors.
+    fn foo<'a, 'b, T: Life + Eq>(a: Of<'a, T>, b: Of<'b, T>) {
+        let mut v = a;
+        // v = b; //~ [rustc E0623] [E] lifetime mismatch ...but data from `a` flows into `b` here
+
+        // a == b;
+        //^~ [rustc E0369] [E] binary operation `==` cannot be applied to type `<<T as UnPlugLife>::T as PlugLife>::T<'a>`
+        //   the trait `std::cmp::PartialEq` is not implemented for `<<T as UnPlugLife>::T as PlugLife>::T<'a>`
+    }
+
     fn eq_usize<'a, 'b>(a: <usize as Life>::L<'a>, b: <usize as Life>::L<'b>) {
         a == b;
     }
